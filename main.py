@@ -667,7 +667,8 @@ async def keep_alive():
 async def webhook_handler(request):
     """Process Telegram updates."""
     try:
-        await ptb_app.process_update(request)
+        data = await request.json()
+        await ptb_app.process_update(data)
     except Exception as e:
         logger.error(f"Webhook error: {e}")
     return web.Response(status=200)
@@ -690,9 +691,19 @@ def main():
 
     async def on_startup(app_web):
         global _session, _worker_tasks
+        # Initialize PTB and set webhook
+        await ptb_app.initialize()
+        webhook_url = f"{WEBHOOK_BASE}/webhook" if WEBHOOK_BASE else None
+        if webhook_url:
+            await ptb_app.bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook set to {webhook_url}")
+        else:
+            logger.error("WEBHOOK_BASE not set. Can't set webhook.")
+        # SMS workers
         _session = aiohttp.ClientSession()
         _worker_tasks = [asyncio.create_task(sms_worker(_session)) for _ in range(20)]
         logger.info("SMS workers started")
+        # Keep-alive
         asyncio.create_task(keep_alive())
 
     async def on_shutdown(app_web):
@@ -709,17 +720,6 @@ def main():
     aiohttp_app.router.add_get("/ping", ping_handler)
     aiohttp_app.on_startup.append(on_startup)
     aiohttp_app.on_shutdown.append(on_shutdown)
-
-    webhook_url = f"{WEBHOOK_BASE}/webhook" if WEBHOOK_BASE else None
-    if not webhook_url:
-        logger.error("WEBHOOK_BASE not set. Set RENDER_EXTERNAL_URL env.")
-        return
-
-    async def set_webhook():
-        await ptb_app.bot.set_webhook(url=webhook_url)
-        logger.info(f"Webhook set to {webhook_url}")
-
-    ptb_app.post_init = set_webhook
 
     web.run_app(aiohttp_app, host="0.0.0.0", port=PORT)
 
