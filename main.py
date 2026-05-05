@@ -8,6 +8,7 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes
 )
 from telegram.constants import ParseMode
+from aiohttp import web
 import aiohttp
 
 from database import *
@@ -25,7 +26,6 @@ sms_queue = asyncio.Queue(maxsize=5000)
 _worker_tasks = []
 _session = None
 
-# Session state – key: "user_id:phone" -> asyncio.Event
 bombing_active = {}          # "uid:phone" -> Event
 request_counts = {}          # "uid:phone" -> int
 
@@ -85,6 +85,13 @@ async def _call_api(session, api_conf, phone, cc=DEFAULT_COUNTRY_CODE):
     except:
         return False
 
+# ---------- PHONE NUMBER CLEANING ----------
+def clean_phone_number(text: str) -> str | None:
+    digits = ''.join(filter(str.isdigit, text))
+    if len(digits) < 10:
+        return None
+    return digits[-10:]
+
 # ---------- KEYBOARDS ----------
 def main_menu_keyboard(user_id):
     buttons = [
@@ -113,6 +120,7 @@ def admin_panel_keyboard():
         [InlineKeyboardButton("🔨 Ban", callback_data="ban_prompt"),
          InlineKeyboardButton("✅ Unban", callback_data="unban_prompt")],
         [InlineKeyboardButton("🗑 Delete User", callback_data="deleteuser_prompt")],
+        [InlineKeyboardButton("🛡 Protected Numbers", callback_data="protected_numbers")],
         [InlineKeyboardButton("⏱ Set Call Interval", callback_data="setcallinterval_prompt"),
          InlineKeyboardButton("⏱ Set SMS Interval", callback_data="setsmsinterval_prompt")],
         [InlineKeyboardButton("💾 Backup", callback_data="backup"),
@@ -130,7 +138,7 @@ async def perform_bombing(user_id, phone, context):
         if not stop_flag.is_set():
             request_counts[session_key] += 1
 
-    # Call loop: one by one, every call_interval
+    # Call loop
     async def call_loop():
         idx = 0
         async with aiohttp.ClientSession() as sess:
@@ -144,7 +152,7 @@ async def perform_bombing(user_id, phone, context):
                 except asyncio.TimeoutError:
                     pass
 
-    # SMS loop: queue all every sms_interval
+    # SMS loop
     async def sms_loop():
         while not stop_flag.is_set():
             for api in SMS_APIS:
@@ -231,20 +239,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "cmd_stop":
         uid = query.from_user.id
-        # Gather active sessions for this user
         active = {k: v for k, v in bombing_active.items() if k.startswith(f"{uid}:") and not v.is_set()}
         if not active:
             await query.edit_message_text("ℹ️ No active bombing.", reply_markup=main_menu_keyboard(uid))
             return
 
         if len(active) == 1:
-            # Only one session – stop directly
             key = list(active.keys())[0]
             active[key].set()
             phone = key.split(":", 1)[1]
             await query.edit_message_text(f"🛑 Stopped bombing on {phone}", reply_markup=main_menu_keyboard(uid))
         else:
-            # Multiple sessions – let user choose
             buttons = []
             for key, event in active.items():
                 phone = key.split(":", 1)[1]
@@ -256,8 +261,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "cmd_speedup":
         uid = query.from_user.id
-        active = {k: v for k, v in bombing_active.items() if k.startswith(f"{uid}:") and not v.is_set()}
-        if not active:
+        if not any(k.startswith(f"{uid}:") and not v.is_set() for k, v in bombing_active.items()):
             await query.edit_message_text("No active bombing.", reply_markup=main_menu_keyboard(uid))
             return
         global call_interval, sms_interval
@@ -268,8 +272,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "cmd_speeddown":
         uid = query.from_user.id
-        active = {k: v for k, v in bombing_active.items() if k.startswith(f"{uid}:") and not v.is_set()}
-        if not active:
+        if not any(k.startswith(f"{uid}:") and not v.is_set() for k, v in bombing_active.items()):
             await query.edit_message_text("No active bombing.", reply_markup=main_menu_keyboard(uid))
             return
         call_interval = min(MAX_INTERVAL, call_interval + 5)
@@ -326,7 +329,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛡 Admin Panel:", reply_markup=admin_panel_keyboard())
         return
 
-    # ----- Admin list/recent users pagination -----
+    # Admin list / recent pagination
     elif data.startswith("list_users"):
         page = int(data.split(":")[1]) if ":" in data else 0
         users = await async_db(get_all_users_paginated, page, 10)
@@ -368,36 +371,70 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"📊 Total users: {cnt}{BRANDING}", parse_mode=ParseMode.HTML, reply_markup=admin_panel_keyboard())
         return
 
-    # ----- Admin prompts (set flags) -----
-    prompts = {
-        "lookup_prompt": "admin_lookup",
-        "broadcast_prompt": "broadcast",
-        "dm_prompt": "admin_dm",
-        "bulkdm_prompt": "bulkdm",
-        "ban_prompt": "ban",
-        "unban_prompt": "unban",
-        "deleteuser_prompt": "deleteuser",
-        "addadmin_prompt": "addadmin",
-        "removeadmin_prompt": "removeadmin",
-        "setcallinterval_prompt": "set_call_interval",
-        "setsmsinterval_prompt": "set_sms_interval",
+    # Admin prompts (set flags)
+    admin_prompts = {
+        "lookup_prompt": ("admin_lookup", "Enter user ID to lookup:"),
+        "broadcast_prompt": ("broadcast", "Send the message you want to broadcast:"),
+        "dm_prompt": ("admin_dm", "Enter target user ID followed by message (e.g., 123456 Hello):"),
+        "bulkdm_prompt": ("bulkdm", "Enter comma-separated user IDs followed by message:"),
+        "ban_prompt": ("ban", "Enter user ID to ban:"),
+        "unban_prompt": ("unban", "Enter user ID to unban:"),
+        "deleteuser_prompt": ("deleteuser", "Enter user ID to delete:"),
+        "addadmin_prompt": ("addadmin", "Enter user ID to promote to admin:"),
+        "removeadmin_prompt": ("removeadmin", "Enter user ID to demote:"),
+        "setcallinterval_prompt": ("set_call_interval", "Enter new call interval in seconds (min 10):"),
+        "setsmsinterval_prompt": ("set_sms_interval", "Enter new SMS interval in seconds (min 2):"),
     }
-    if data in prompts:
-        context.user_data[prompts[data]] = True
-        desc = {
-            "lookup_prompt": "Enter user ID to lookup:",
-            "broadcast_prompt": "Send the message you want to broadcast:",
-            "dm_prompt": "Enter target user ID followed by message (e.g., 123456 Hello):",
-            "bulkdm_prompt": "Enter comma-separated user IDs followed by message:",
-            "ban_prompt": "Enter user ID to ban:",
-            "unban_prompt": "Enter user ID to unban:",
-            "deleteuser_prompt": "Enter user ID to delete:",
-            "addadmin_prompt": "Enter user ID to promote to admin:",
-            "removeadmin_prompt": "Enter user ID to demote:",
-            "setcallinterval_prompt": "Enter new call interval in seconds (min 10):",
-            "setsmsinterval_prompt": "Enter new SMS interval in seconds (min 2):",
-        }
-        await query.edit_message_text(desc[data])
+    if data in admin_prompts:
+        flag, msg = admin_prompts[data]
+        context.user_data[flag] = True
+        await query.edit_message_text(msg)
+        return
+
+    # Protected numbers
+    elif data == "protected_numbers":
+        if not is_admin(query.from_user.id):
+            return
+        nums = await async_db(get_all_protected_numbers)
+        if not nums:
+            await query.edit_message_text(
+                "No protected numbers yet.\nUse ➕ Add Number to protect one.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ Add Number", callback_data="add_protected_prompt")],
+                    [InlineKeyboardButton("🔙 Back", callback_data="admin_panel")]
+                ])
+            )
+        else:
+            buttons = []
+            for num in nums:
+                buttons.append([InlineKeyboardButton(f"📱 {num}  ❌", callback_data=f"del_protected:{num}")])
+            buttons.append([InlineKeyboardButton("➕ Add Number", callback_data="add_protected_prompt")])
+            buttons.append([InlineKeyboardButton("🔙 Back", callback_data="admin_panel")])
+            await query.edit_message_text(
+                f"🛡 Protected Numbers ({len(nums)}):",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+        return
+
+    elif data.startswith("del_protected:"):
+        num = data.split(":", 1)[1]
+        ok = await async_db(remove_protected_number, num)
+        await query.answer(f"{'Removed' if ok else 'Not found'}")
+        nums = await async_db(get_all_protected_numbers)
+        buttons = []
+        for n in nums:
+            buttons.append([InlineKeyboardButton(f"📱 {n}  ❌", callback_data=f"del_protected:{n}")])
+        buttons.append([InlineKeyboardButton("➕ Add Number", callback_data="add_protected_prompt")])
+        buttons.append([InlineKeyboardButton("🔙 Back", callback_data="admin_panel")])
+        await query.edit_message_text(
+            f"🛡 Protected Numbers ({len(nums)}):",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        return
+
+    elif data == "add_protected_prompt":
+        context.user_data["add_protected"] = True
+        await query.edit_message_text("📱 Enter the 10‑digit number to protect:")
         return
 
     elif data == "backup":
@@ -422,21 +459,29 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Bomb number input
     if user_data.get("awaiting_bomb_number"):
         user_data["awaiting_bomb_number"] = False
-        phone = ''.join(filter(str.isdigit, text))
-        if len(phone) < 10:
-            await update.message.reply_text("❌ Invalid number. At least 10 digits.")
+        phone = clean_phone_number(text)
+        if not phone:
+            await update.message.reply_text(
+                "❌ Invalid number! Please send a valid 10‑digit mobile number.\n"
+                "Example: 9876543210, +91-9876543210, 919876543210"
+            )
             return
-        # Self-bombing check
-        user_phone = await async_db(get_user_phone, uid)
+
+        if await async_db(is_protected_number, phone):
+            await update.message.reply_text("❌ This number is globally protected and cannot be bombed.")
+            return
+
+        raw_user_phone = await async_db(get_user_phone, uid)
+        user_phone = clean_phone_number(raw_user_phone) if raw_user_phone else None
         if user_phone and user_phone == phone:
             await update.message.reply_text("❌ Self‑bombing not allowed.")
             return
-        # Start new session (don't stop others)
+
         asyncio.create_task(perform_bombing(uid, phone, context))
         return
 
-    # ------ Admin prompts handling ------
-    # Admin lookup
+    # Admin prompts
+    # Lookup
     if user_data.get("admin_lookup"):
         user_data["admin_lookup"] = False
         try:
@@ -490,7 +535,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🗑 User {tid} deleted." if ok else "User not found.")
         return
 
-    # Broadcast (message only, no forwarding here – simplistic)
+    # Broadcast
     if user_data.get("broadcast"):
         user_data["broadcast"] = False
         ids = await async_db(get_all_user_ids)
@@ -499,7 +544,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(chat_id=target, text=text + BRANDING, parse_mode=ParseMode.HTML)
                 success += 1
-                await asyncio.sleep(0.05)   # avoid flood limits
+                await asyncio.sleep(0.05)
             except:
                 pass
         await update.message.reply_text(f"📨 Broadcast sent to {success}/{len(ids)} users.")
@@ -595,24 +640,62 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ SMS interval set to {sms_interval}s.")
         return
 
+    # Add protected number
+    if user_data.get("add_protected"):
+        user_data["add_protected"] = False
+        phone = clean_phone_number(text)
+        if not phone:
+            await update.message.reply_text("❌ Invalid number. Must contain at least 10 digits.")
+            return
+        await async_db(add_protected_number, phone)
+        await update.message.reply_text(f"✅ {phone} added to protected list. No one can bomb it.")
+        return
+
+# ---------- AIOHTTP SERVER & KEEP-ALIVE ----------
+async def keep_alive():
+    """Ping our own /ping endpoint every 5 minutes to prevent Render sleep."""
+    await asyncio.sleep(60)
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(f"http://localhost:{PORT}/ping") as resp:
+                    logger.info(f"Keep-alive ping: {resp.status}")
+            except Exception as e:
+                logger.error(f"Keep-alive error: {e}")
+            await asyncio.sleep(300)
+
+async def webhook_handler(request):
+    """Process Telegram updates."""
+    try:
+        await ptb_app.process_update(request)
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+    return web.Response(status=200)
+
+async def ping_handler(request):
+    return web.Response(text="pong")
+
+ptb_app = None
+
 # ---------- MAIN ----------
 def main():
+    global ptb_app
     init_db()
-    app = Application.builder().token(BOT_TOKEN).build()
+    ptb_app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu_cmd))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    ptb_app.add_handler(CommandHandler("start", start))
+    ptb_app.add_handler(CommandHandler("menu", menu_cmd))
+    ptb_app.add_handler(CallbackQueryHandler(button_handler))
+    ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    # Start / stop SMS worker pool
-    async def on_startup():
+    async def on_startup(app_web):
         global _session, _worker_tasks
         _session = aiohttp.ClientSession()
         _worker_tasks = [asyncio.create_task(sms_worker(_session)) for _ in range(20)]
         logger.info("SMS workers started")
+        asyncio.create_task(keep_alive())
 
-    async def on_shutdown():
+    async def on_shutdown(app_web):
         global _session, _worker_tasks
         for _ in range(20):
             await sms_queue.put(None)
@@ -621,21 +704,24 @@ def main():
             await _session.close()
         logger.info("SMS workers stopped")
 
-    app.post_init = on_startup
-    app.post_shutdown = on_shutdown
+    aiohttp_app = web.Application()
+    aiohttp_app.router.add_post("/webhook", webhook_handler)
+    aiohttp_app.router.add_get("/ping", ping_handler)
+    aiohttp_app.on_startup.append(on_startup)
+    aiohttp_app.on_shutdown.append(on_shutdown)
 
     webhook_url = f"{WEBHOOK_BASE}/webhook" if WEBHOOK_BASE else None
     if not webhook_url:
-        logger.error("WEBHOOK_BASE not set. Set RENDER_EXTERNAL_URL env variable.")
+        logger.error("WEBHOOK_BASE not set. Set RENDER_EXTERNAL_URL env.")
         return
 
-    logger.info(f"Starting webhook on {webhook_url}")
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path="webhook",
-        webhook_url=webhook_url
-    )
+    async def set_webhook():
+        await ptb_app.bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook set to {webhook_url}")
+
+    ptb_app.post_init = set_webhook
+
+    web.run_app(aiohttp_app, host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
     main()
