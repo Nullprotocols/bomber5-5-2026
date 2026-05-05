@@ -12,7 +12,7 @@ def get_connection():
     return conn
 
 def init_db():
-    """Create users table if not exists."""
+    """Create all tables if they don't exist and enable WAL mode."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('''
@@ -27,13 +27,17 @@ def init_db():
             user_phone TEXT
         )
     ''')
-    # Enable WAL mode for better concurrency
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS protected_numbers (
+            phone TEXT PRIMARY KEY
+        )
+    ''')
     c.execute("PRAGMA journal_mode=WAL;")
     conn.commit()
     conn.close()
 
 def add_user(user_id: int, username: Optional[str], first_name: Optional[str]):
-    """Add a new user to the database if not already present."""
+    """Add a new user if not already present."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('''
@@ -45,11 +49,9 @@ def add_user(user_id: int, username: Optional[str], first_name: Optional[str]):
 
 def is_admin(user_id: int) -> bool:
     """Check if user is admin (owner or role=admin)."""
-    # First check if this user is the owner
     owner_id = os.getenv("OWNER_ID")
     if owner_id and str(user_id) == owner_id:
         return True
-    # Then check database role
     conn = get_connection()
     c = conn.cursor()
     c.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
@@ -192,3 +194,40 @@ def get_user_count() -> int:
     count = c.fetchone()[0]
     conn.close()
     return count
+
+# ---------- Protected Numbers (Global Blacklist) ----------
+def add_protected_number(phone: str):
+    """Add a number to the protected list."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO protected_numbers (phone) VALUES (?)', (phone,))
+    conn.commit()
+    conn.close()
+
+def remove_protected_number(phone: str) -> bool:
+    """Remove a number from the protected list. Returns True if it existed."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute('DELETE FROM protected_numbers WHERE phone = ?', (phone,))
+    conn.commit()
+    affected = c.rowcount
+    conn.close()
+    return affected > 0
+
+def is_protected_number(phone: str) -> bool:
+    """Check if a number is protected (cannot be bombed)."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute('SELECT 1 FROM protected_numbers WHERE phone = ?', (phone,))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
+
+def get_all_protected_numbers() -> List[str]:
+    """Return all protected phone numbers."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute('SELECT phone FROM protected_numbers ORDER BY phone')
+    rows = c.fetchall()
+    conn.close()
+    return [row['phone'] for row in rows]
