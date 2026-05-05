@@ -29,7 +29,7 @@ TELEGRAM_RATE_LIMIT = 5         # minimum seconds between status updates
 
 # ============================== 71 APIs ====================================
 # CALL APIs (7) – hit one by one every call_interval seconds
-# SMS / WHATSAPP APIs (64) – all fired together every sms_interval seconds
+# SMS / WHATSAPP APIs (64) – fired together every sms_interval seconds
 BOMBER_APIS = [
 
     # ----------------- CALL APIs (7) ------------------
