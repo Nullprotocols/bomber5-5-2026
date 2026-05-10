@@ -691,20 +691,35 @@ def main():
 
     async def on_startup(app_web):
         global _session, _worker_tasks
-        # Initialize PTB and set webhook
+        # Initialize PTB (bot ready)
         await ptb_app.initialize()
-        webhook_url = f"{WEBHOOK_BASE}/webhook" if WEBHOOK_BASE else None
-        if webhook_url:
-            await ptb_app.bot.set_webhook(url=webhook_url)
-            logger.info(f"Webhook set to {webhook_url}")
-        else:
-            logger.error("WEBHOOK_BASE not set. Can't set webhook.")
+        logger.info("PTB application initialized")
+
         # SMS workers
         _session = aiohttp.ClientSession()
         _worker_tasks = [asyncio.create_task(sms_worker(_session)) for _ in range(20)]
         logger.info("SMS workers started")
+
         # Keep-alive
         asyncio.create_task(keep_alive())
+
+        # Delay webhook setup to ensure server is ready
+        asyncio.create_task(set_webhook_after_delay())
+
+    async def set_webhook_after_delay():
+        await asyncio.sleep(10)
+        webhook_url = f"{WEBHOOK_BASE}/webhook" if WEBHOOK_BASE else None
+        if not webhook_url:
+            logger.error("WEBHOOK_BASE not set! Cannot set webhook.")
+            return
+        try:
+            await ptb_app.bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook successfully set to {webhook_url}")
+            # Optional: fetch webhook info to confirm
+            info = await ptb_app.bot.get_webhook_info()
+            logger.info(f"Webhook info: {info}")
+        except Exception as e:
+            logger.error(f"Failed to set webhook: {e}")
 
     async def on_shutdown(app_web):
         global _session, _worker_tasks
