@@ -1,4 +1,4 @@
-# main.py – Advanced Telegram Bomber Bot (Final & Complete)
+# main.py – Advanced Telegram Bomber Bot (100% WORKING)
 import os, logging, asyncio, json, io, time
 from datetime import datetime
 from dotenv import load_dotenv
@@ -26,7 +26,7 @@ sms_queue = asyncio.Queue(maxsize=5000)
 _worker_tasks = []
 _session = None
 
-bombing_active = {}          # "uid:phone" -> Event
+bombing_active = {}          # "uid:phone" -> asyncio.Event
 request_counts = {}          # "uid:phone" -> int
 
 # ---------- ASYNC DB WRAPPER ----------
@@ -138,7 +138,6 @@ async def perform_bombing(user_id, phone, context):
         if not stop_flag.is_set():
             request_counts[session_key] += 1
 
-    # Call loop
     async def call_loop():
         idx = 0
         async with aiohttp.ClientSession() as sess:
@@ -152,7 +151,6 @@ async def perform_bombing(user_id, phone, context):
                 except asyncio.TimeoutError:
                     pass
 
-    # SMS loop
     async def sms_loop():
         while not stop_flag.is_set():
             for api in SMS_APIS:
@@ -164,7 +162,6 @@ async def perform_bombing(user_id, phone, context):
             except asyncio.TimeoutError:
                 pass
 
-    # Status updater
     async def status_updater():
         last_cnt = 0
         last_time = 0
@@ -179,7 +176,6 @@ async def perform_bombing(user_id, phone, context):
                 last_cnt = cnt
                 last_time = now
 
-    # Auto-stop
     async def auto_stop():
         await asyncio.sleep(AUTO_STOP_SECONDS)
         if not stop_flag.is_set():
@@ -215,6 +211,7 @@ async def perform_bombing(user_id, phone, context):
 # ---------- COMMAND HANDLERS ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    logger.info(f"Start from {user.id}")
     await async_db(add_user, user.id, user.username, user.first_name)
     await update.message.reply_text(
         f"Welcome {user.first_name}! 🤖\nUse the buttons below:{BRANDING}",
@@ -231,10 +228,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     await query.answer()
 
-    # ----- User flows -----
     if data == "bomb_start":
         context.user_data["awaiting_bomb_number"] = True
-        await query.edit_message_text("📱 Please send the target phone number (10 digits):")
+        await query.edit_message_text("📱 Send target phone number (10 digits):")
         return
 
     elif data == "cmd_stop":
@@ -243,7 +239,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not active:
             await query.edit_message_text("ℹ️ No active bombing.", reply_markup=main_menu_keyboard(uid))
             return
-
         if len(active) == 1:
             key = list(active.keys())[0]
             active[key].set()
@@ -251,12 +246,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"🛑 Stopped bombing on {phone}", reply_markup=main_menu_keyboard(uid))
         else:
             buttons = []
-            for key, event in active.items():
+            for key, ev in active.items():
                 phone = key.split(":", 1)[1]
                 buttons.append([InlineKeyboardButton(f"📱 {phone}", callback_data=f"stop_session:{key}")])
             buttons.append([InlineKeyboardButton("🛑 Stop All", callback_data=f"stop_all:{uid}")])
             buttons.append([InlineKeyboardButton("🔙 Cancel", callback_data="back_to_main")])
-            await query.edit_message_text("Select which bombing to stop:", reply_markup=InlineKeyboardMarkup(buttons))
+            await query.edit_message_text("Select which to stop:", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
     elif data == "cmd_speedup":
@@ -289,17 +284,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "help":
-        text = (
-            "💣 Bomb – Start a bombing session\n"
-            "🛑 Stop – Stop one or all sessions\n"
-            "⚡ Speed Up / 🐢 Speed Down – Adjust timing\n"
-            "👤 My Account – Your info\n"
-            "ℹ️ Help – This message"
-        )
+        text = ("💣 Bomb – Start bombing\n🛑 Stop – Stop session\n⚡ Speed Up / 🐢 Speed Down\n👤 My Account\nℹ️ Help")
         await query.edit_message_text(text, reply_markup=main_menu_keyboard(query.from_user.id))
         return
 
-    # ----- Stop session / all -----
     elif data.startswith("stop_session:"):
         key = data.split(":", 1)[1]
         flag = bombing_active.get(key)
@@ -314,14 +302,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("stop_all:"):
         uid = query.from_user.id
         stopped = 0
-        for key, event in bombing_active.items():
-            if key.startswith(f"{uid}:") and not event.is_set():
-                event.set()
+        for key, ev in bombing_active.items():
+            if key.startswith(f"{uid}:") and not ev.is_set():
+                ev.set()
                 stopped += 1
         await query.edit_message_text(f"🛑 Stopped all {stopped} sessions.", reply_markup=main_menu_keyboard(uid))
         return
 
-    # ----- Admin panel -----
     elif data == "admin_panel":
         if not is_admin(query.from_user.id):
             await query.edit_message_text("Access denied.")
@@ -329,7 +316,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛡 Admin Panel:", reply_markup=admin_panel_keyboard())
         return
 
-    # Admin list / recent pagination
     elif data.startswith("list_users"):
         page = int(data.split(":")[1]) if ":" in data else 0
         users = await async_db(get_all_users_paginated, page, 10)
@@ -339,13 +325,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"👥 Users (page {page+1}):\n"
         for u in users:
             text += f"`{u['user_id']}` @{u['username'] or 'no'} {u['first_name'] or ''}\n"
-        buttons = []
+        btns = []
         if page > 0:
-            buttons.append(InlineKeyboardButton("◀️", callback_data=f"list_users:{page-1}"))
+            btns.append(InlineKeyboardButton("◀️", callback_data=f"list_users:{page-1}"))
         if len(users) == 10:
-            buttons.append(InlineKeyboardButton("▶️", callback_data=f"list_users:{page+1}"))
-        buttons.append(InlineKeyboardButton("🔙 Back", callback_data="admin_panel"))
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([buttons]), parse_mode=ParseMode.MARKDOWN)
+            btns.append(InlineKeyboardButton("▶️", callback_data=f"list_users:{page+1}"))
+        btns.append(InlineKeyboardButton("🔙 Back", callback_data="admin_panel"))
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([btns]), parse_mode=ParseMode.MARKDOWN)
         return
 
     elif data.startswith("recent_users"):
@@ -357,13 +343,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"🕒 Recent (7d) page {page+1}:\n"
         for u in users:
             text += f"`{u['user_id']}` @{u['username'] or 'no'} {u['joined_at']}\n"
-        buttons = []
+        btns = []
         if page > 0:
-            buttons.append(InlineKeyboardButton("◀️", callback_data=f"recent_users:{page-1}"))
+            btns.append(InlineKeyboardButton("◀️", callback_data=f"recent_users:{page-1}"))
         if len(users) == 10:
-            buttons.append(InlineKeyboardButton("▶️", callback_data=f"recent_users:{page+1}"))
-        buttons.append(InlineKeyboardButton("🔙 Back", callback_data="admin_panel"))
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([buttons]), parse_mode=ParseMode.MARKDOWN)
+            btns.append(InlineKeyboardButton("▶️", callback_data=f"recent_users:{page+1}"))
+        btns.append(InlineKeyboardButton("🔙 Back", callback_data="admin_panel"))
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([btns]), parse_mode=ParseMode.MARKDOWN)
         return
 
     elif data == "admin_stats":
@@ -371,19 +357,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"📊 Total users: {cnt}{BRANDING}", parse_mode=ParseMode.HTML, reply_markup=admin_panel_keyboard())
         return
 
-    # Admin prompts (set flags)
     admin_prompts = {
         "lookup_prompt": ("admin_lookup", "Enter user ID to lookup:"),
-        "broadcast_prompt": ("broadcast", "Send the message you want to broadcast:"),
-        "dm_prompt": ("admin_dm", "Enter target user ID followed by message (e.g., 123456 Hello):"),
+        "broadcast_prompt": ("broadcast", "Send the message to broadcast:"),
+        "dm_prompt": ("admin_dm", "Enter target user ID followed by message:"),
         "bulkdm_prompt": ("bulkdm", "Enter comma-separated user IDs followed by message:"),
         "ban_prompt": ("ban", "Enter user ID to ban:"),
         "unban_prompt": ("unban", "Enter user ID to unban:"),
         "deleteuser_prompt": ("deleteuser", "Enter user ID to delete:"),
         "addadmin_prompt": ("addadmin", "Enter user ID to promote to admin:"),
         "removeadmin_prompt": ("removeadmin", "Enter user ID to demote:"),
-        "setcallinterval_prompt": ("set_call_interval", "Enter new call interval in seconds (min 10):"),
-        "setsmsinterval_prompt": ("set_sms_interval", "Enter new SMS interval in seconds (min 2):"),
+        "setcallinterval_prompt": ("set_call_interval", "Enter new call interval (min 10):"),
+        "setsmsinterval_prompt": ("set_sms_interval", "Enter new SMS interval (min 2):"),
     }
     if data in admin_prompts:
         flag, msg = admin_prompts[data]
@@ -391,29 +376,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(msg)
         return
 
-    # Protected numbers
     elif data == "protected_numbers":
         if not is_admin(query.from_user.id):
             return
         nums = await async_db(get_all_protected_numbers)
         if not nums:
-            await query.edit_message_text(
-                "No protected numbers yet.\nUse ➕ Add Number to protect one.",
+            await query.edit_message_text("No protected numbers.\nUse ➕ Add Number.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("➕ Add Number", callback_data="add_protected_prompt")],
                     [InlineKeyboardButton("🔙 Back", callback_data="admin_panel")]
-                ])
-            )
+                ]))
         else:
-            buttons = []
+            btns = []
             for num in nums:
-                buttons.append([InlineKeyboardButton(f"📱 {num}  ❌", callback_data=f"del_protected:{num}")])
-            buttons.append([InlineKeyboardButton("➕ Add Number", callback_data="add_protected_prompt")])
-            buttons.append([InlineKeyboardButton("🔙 Back", callback_data="admin_panel")])
-            await query.edit_message_text(
-                f"🛡 Protected Numbers ({len(nums)}):",
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
+                btns.append([InlineKeyboardButton(f"📱 {num}  ❌", callback_data=f"del_protected:{num}")])
+            btns.append([InlineKeyboardButton("➕ Add Number", callback_data="add_protected_prompt")])
+            btns.append([InlineKeyboardButton("🔙 Back", callback_data="admin_panel")])
+            await query.edit_message_text(f"🛡 Protected Numbers ({len(nums)}):", reply_markup=InlineKeyboardMarkup(btns))
         return
 
     elif data.startswith("del_protected:"):
@@ -421,20 +400,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok = await async_db(remove_protected_number, num)
         await query.answer(f"{'Removed' if ok else 'Not found'}")
         nums = await async_db(get_all_protected_numbers)
-        buttons = []
+        btns = []
         for n in nums:
-            buttons.append([InlineKeyboardButton(f"📱 {n}  ❌", callback_data=f"del_protected:{n}")])
-        buttons.append([InlineKeyboardButton("➕ Add Number", callback_data="add_protected_prompt")])
-        buttons.append([InlineKeyboardButton("🔙 Back", callback_data="admin_panel")])
-        await query.edit_message_text(
-            f"🛡 Protected Numbers ({len(nums)}):",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+            btns.append([InlineKeyboardButton(f"📱 {n}  ❌", callback_data=f"del_protected:{n}")])
+        btns.append([InlineKeyboardButton("➕ Add Number", callback_data="add_protected_prompt")])
+        btns.append([InlineKeyboardButton("🔙 Back", callback_data="admin_panel")])
+        await query.edit_message_text(f"🛡 Protected Numbers ({len(nums)}):", reply_markup=InlineKeyboardMarkup(btns))
         return
 
     elif data == "add_protected_prompt":
         context.user_data["add_protected"] = True
-        await query.edit_message_text("📱 Enter the 10‑digit number to protect:")
+        await query.edit_message_text("📱 Enter 10‑digit number to protect:")
         return
 
     elif data == "backup":
@@ -456,93 +432,76 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = context.user_data
     text = update.message.text.strip()
 
-    # Bomb number input
     if user_data.get("awaiting_bomb_number"):
         user_data["awaiting_bomb_number"] = False
         phone = clean_phone_number(text)
         if not phone:
-            await update.message.reply_text(
-                "❌ Invalid number! Please send a valid 10‑digit mobile number.\n"
-                "Example: 9876543210, +91-9876543210, 919876543210"
-            )
+            await update.message.reply_text("❌ Invalid number. Send 10‑digit number.")
             return
-
         if await async_db(is_protected_number, phone):
-            await update.message.reply_text("❌ This number is globally protected and cannot be bombed.")
+            await update.message.reply_text("❌ This number is globally protected.")
             return
-
-        raw_user_phone = await async_db(get_user_phone, uid)
-        user_phone = clean_phone_number(raw_user_phone) if raw_user_phone else None
-        if user_phone and user_phone == phone:
+        raw = await async_db(get_user_phone, uid)
+        if raw and clean_phone_number(raw) == phone:
             await update.message.reply_text("❌ Self‑bombing not allowed.")
             return
-
         asyncio.create_task(perform_bombing(uid, phone, context))
         return
 
-    # Admin prompts
-    # Lookup
+    # Admin text inputs
     if user_data.get("admin_lookup"):
-        user_data["admin_lookup"] = False
+        user_data.pop("admin_lookup")
         try:
             tid = int(text)
+            user = await async_db(get_user_by_id, tid)
+            if not user:
+                await update.message.reply_text("User not found.")
+            else:
+                target = await async_db(get_user_target, tid) or "None"
+                msg = (f"🔍 User: {tid}\nName: {user['first_name']}\nUsername: @{user['username']}\n"
+                       f"Role: {user['role']}\nBanned: {bool(user['banned'])}\nTarget: {target}{BRANDING}")
+                await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         except:
             await update.message.reply_text("Invalid ID.")
-            return
-        user = await async_db(get_user_by_id, tid)
-        if not user:
-            await update.message.reply_text("User not found.")
-            return
-        target = await async_db(get_user_target, tid) or "None"
-        msg = (f"🔍 User: {tid}\nName: {user['first_name']}\nUsername: @{user['username']}\n"
-               f"Role: {user['role']}\nBanned: {bool(user['banned'])}\nTarget: {target}{BRANDING}")
-        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         return
 
-    # Ban
     if user_data.get("ban"):
-        user_data["ban"] = False
+        user_data.pop("ban")
         try:
             tid = int(text)
+            ok = await async_db(ban_user, tid)
+            await update.message.reply_text(f"🔨 User {tid} banned." if ok else "User not found.")
         except:
             await update.message.reply_text("Invalid ID.")
-            return
-        ok = await async_db(ban_user, tid)
-        await update.message.reply_text(f"🔨 User {tid} banned." if ok else "User not found.")
         return
 
-    # Unban
     if user_data.get("unban"):
-        user_data["unban"] = False
+        user_data.pop("unban")
         try:
             tid = int(text)
+            ok = await async_db(unban_user, tid)
+            await update.message.reply_text(f"✅ User {tid} unbanned." if ok else "User not found.")
         except:
             await update.message.reply_text("Invalid ID.")
-            return
-        ok = await async_db(unban_user, tid)
-        await update.message.reply_text(f"✅ User {tid} unbanned." if ok else "User not found or not banned.")
         return
 
-    # Delete user
     if user_data.get("deleteuser"):
-        user_data["deleteuser"] = False
+        user_data.pop("deleteuser")
         try:
             tid = int(text)
+            ok = await async_db(delete_user, tid)
+            await update.message.reply_text(f"🗑 User {tid} deleted." if ok else "User not found.")
         except:
             await update.message.reply_text("Invalid ID.")
-            return
-        ok = await async_db(delete_user, tid)
-        await update.message.reply_text(f"🗑 User {tid} deleted." if ok else "User not found.")
         return
 
-    # Broadcast
     if user_data.get("broadcast"):
-        user_data["broadcast"] = False
+        user_data.pop("broadcast")
         ids = await async_db(get_all_user_ids)
         success = 0
-        for target in ids:
+        for t in ids:
             try:
-                await context.bot.send_message(chat_id=target, text=text + BRANDING, parse_mode=ParseMode.HTML)
+                await context.bot.send_message(chat_id=t, text=text + BRANDING, parse_mode=ParseMode.HTML)
                 success += 1
                 await asyncio.sleep(0.05)
             except:
@@ -550,29 +509,23 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"📨 Broadcast sent to {success}/{len(ids)} users.")
         return
 
-    # DM (format: <id> <message>)
     if user_data.get("admin_dm"):
-        user_data["admin_dm"] = False
+        user_data.pop("admin_dm")
         parts = text.split(maxsplit=1)
         if len(parts) < 2:
             await update.message.reply_text("Usage: <user_id> <message>")
             return
         try:
             tid = int(parts[0])
-        except:
-            await update.message.reply_text("Invalid user ID.")
-            return
-        msg = parts[1] + BRANDING
-        try:
+            msg = parts[1] + BRANDING
             await context.bot.send_message(chat_id=tid, text=msg, parse_mode=ParseMode.HTML)
             await update.message.reply_text(f"💬 Message sent to {tid}.")
         except Exception as e:
             await update.message.reply_text(f"Failed: {e}")
         return
 
-    # Bulk DM (format: id1,id2,... message)
     if user_data.get("bulkdm"):
-        user_data["bulkdm"] = False
+        user_data.pop("bulkdm")
         parts = text.split(maxsplit=1)
         if len(parts) < 2:
             await update.message.reply_text("Usage: <id1,id2,...> <message>")
@@ -590,70 +543,64 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"💬 Bulk DM sent to {success}/{len(id_strs)} users.")
         return
 
-    # Add admin
     if user_data.get("addadmin"):
-        user_data["addadmin"] = False
+        user_data.pop("addadmin")
         try:
             tid = int(text)
+            await async_db(set_admin_role, tid, True)
+            await update.message.reply_text(f"👑 User {tid} promoted to admin.")
         except:
             await update.message.reply_text("Invalid ID.")
-            return
-        await async_db(set_admin_role, tid, True)
-        await update.message.reply_text(f"👑 User {tid} promoted to admin.")
         return
 
-    # Remove admin
     if user_data.get("removeadmin"):
-        user_data["removeadmin"] = False
+        user_data.pop("removeadmin")
         try:
             tid = int(text)
+            await async_db(set_admin_role, tid, False)
+            await update.message.reply_text(f"❌ User {tid} demoted.")
         except:
             await update.message.reply_text("Invalid ID.")
-            return
-        await async_db(set_admin_role, tid, False)
-        await update.message.reply_text(f"❌ User {tid} demoted.")
         return
 
-    # Set call interval
     if user_data.get("set_call_interval"):
-        user_data["set_call_interval"] = False
+        user_data.pop("set_call_interval")
         try:
             sec = int(text)
+            global call_interval
+            call_interval = max(MIN_CALL_INTERVAL, sec)
+            await update.message.reply_text(f"✅ Call interval set to {call_interval}s.")
         except:
             await update.message.reply_text("Invalid number.")
-            return
-        global call_interval
-        call_interval = max(MIN_CALL_INTERVAL, sec)
-        await update.message.reply_text(f"✅ Call interval set to {call_interval}s.")
         return
 
-    # Set SMS interval
     if user_data.get("set_sms_interval"):
-        user_data["set_sms_interval"] = False
+        user_data.pop("set_sms_interval")
         try:
             sec = int(text)
+            global sms_interval
+            sms_interval = max(MIN_SMS_INTERVAL, sec)
+            await update.message.reply_text(f"✅ SMS interval set to {sms_interval}s.")
         except:
             await update.message.reply_text("Invalid number.")
-            return
-        global sms_interval
-        sms_interval = max(MIN_SMS_INTERVAL, sec)
-        await update.message.reply_text(f"✅ SMS interval set to {sms_interval}s.")
         return
 
-    # Add protected number
     if user_data.get("add_protected"):
-        user_data["add_protected"] = False
+        user_data.pop("add_protected")
         phone = clean_phone_number(text)
         if not phone:
-            await update.message.reply_text("❌ Invalid number. Must contain at least 10 digits.")
+            await update.message.reply_text("❌ Invalid number.")
             return
         await async_db(add_protected_number, phone)
-        await update.message.reply_text(f"✅ {phone} added to protected list. No one can bomb it.")
+        await update.message.reply_text(f"✅ {phone} added to protected list.")
         return
+
+# ---------- ERROR HANDLER ----------
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"Update {update} caused error {context.error}", exc_info=True)
 
 # ---------- AIOHTTP SERVER & KEEP-ALIVE ----------
 async def keep_alive():
-    """Ping our own /ping endpoint every 5 minutes to prevent Render sleep."""
     await asyncio.sleep(60)
     async with aiohttp.ClientSession() as session:
         while True:
@@ -665,12 +612,11 @@ async def keep_alive():
             await asyncio.sleep(300)
 
 async def webhook_handler(request):
-    """Process Telegram updates."""
     try:
         data = await request.json()
         await ptb_app.process_update(data)
     except Exception as e:
-        logger.error(f"Webhook error: {e}")
+        logger.error(f"Webhook error: {e}", exc_info=True)
     return web.Response(status=200)
 
 async def ping_handler(request):
@@ -678,8 +624,7 @@ async def ping_handler(request):
 
 ptb_app = None
 
-# ---------- MAIN ----------
-def main():
+async def main():
     global ptb_app
     init_db()
     ptb_app = Application.builder().token(BOT_TOKEN).build()
@@ -688,40 +633,28 @@ def main():
     ptb_app.add_handler(CommandHandler("menu", menu_cmd))
     ptb_app.add_handler(CallbackQueryHandler(button_handler))
     ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    ptb_app.add_error_handler(error_handler)
 
-    async def on_startup(app_web):
-        global _session, _worker_tasks
-        # Initialize PTB (bot ready)
-        await ptb_app.initialize()
-        logger.info("PTB application initialized")
+    await ptb_app.initialize()
 
-        # SMS workers
-        _session = aiohttp.ClientSession()
-        _worker_tasks = [asyncio.create_task(sms_worker(_session)) for _ in range(20)]
-        logger.info("SMS workers started")
+    webhook_url = f"{WEBHOOK_BASE}/webhook" if WEBHOOK_BASE else None
+    if webhook_url:
+        await ptb_app.bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook set to {webhook_url}")
+    else:
+        logger.error("WEBHOOK_BASE not set – bot cannot receive updates")
 
-        # Keep-alive
-        asyncio.create_task(keep_alive())
+    global _session, _worker_tasks
+    _session = aiohttp.ClientSession()
+    _worker_tasks = [asyncio.create_task(sms_worker(_session)) for _ in range(20)]
+    logger.info("SMS workers started")
+    asyncio.create_task(keep_alive())
 
-        # Delay webhook setup to ensure server is ready
-        asyncio.create_task(set_webhook_after_delay())
+    aio_app = web.Application()
+    aio_app.router.add_post("/webhook", webhook_handler)
+    aio_app.router.add_get("/ping", ping_handler)
 
-    async def set_webhook_after_delay():
-        await asyncio.sleep(10)
-        webhook_url = f"{WEBHOOK_BASE}/webhook" if WEBHOOK_BASE else None
-        if not webhook_url:
-            logger.error("WEBHOOK_BASE not set! Cannot set webhook.")
-            return
-        try:
-            await ptb_app.bot.set_webhook(url=webhook_url)
-            logger.info(f"Webhook successfully set to {webhook_url}")
-            # Optional: fetch webhook info to confirm
-            info = await ptb_app.bot.get_webhook_info()
-            logger.info(f"Webhook info: {info}")
-        except Exception as e:
-            logger.error(f"Failed to set webhook: {e}")
-
-    async def on_shutdown(app_web):
+    async def on_shutdown(app):
         global _session, _worker_tasks
         for _ in range(20):
             await sms_queue.put(None)
@@ -730,13 +663,10 @@ def main():
             await _session.close()
         logger.info("SMS workers stopped")
 
-    aiohttp_app = web.Application()
-    aiohttp_app.router.add_post("/webhook", webhook_handler)
-    aiohttp_app.router.add_get("/ping", ping_handler)
-    aiohttp_app.on_startup.append(on_startup)
-    aiohttp_app.on_shutdown.append(on_shutdown)
+    aio_app.on_shutdown.append(on_shutdown)
 
-    web.run_app(aiohttp_app, host="0.0.0.0", port=PORT)
+    await web._run_app(aio_app, host="0.0.0.0", port=PORT, handle_signals=False)
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
