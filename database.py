@@ -1,4 +1,4 @@
-# database.py – Advanced Telegram Bomber Bot (Final & Complete)
+# database.py – Advanced Telegram Bomber Bot (100% WORKING)
 import sqlite3
 import os
 from typing import List, Optional, Dict
