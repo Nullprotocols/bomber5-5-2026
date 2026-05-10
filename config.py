@@ -8,7 +8,7 @@ DB_FILE = "bot_data.db"
 BOT_TOKEN        = os.getenv("BOT_TOKEN")
 OWNER_ID         = int(os.getenv("OWNER_ID", "0"))
 PORT             = int(os.getenv("PORT", 10000))
-WEBHOOK_BASE     = os.getenv("RENDER_EXTERNAL_URL")   # Render sets this automatically
+WEBHOOK_BASE     = os.getenv("RENDER_EXTERNAL_URL")  # Render sets this automatically
 
 # ============================== BRANDING ==============================
 BRANDING = "\n\n🤖 <b>Powered by NULL PROTOCOL</b>"
@@ -16,8 +16,8 @@ BRANDING = "\n\n🤖 <b>Powered by NULL PROTOCOL</b>"
 # ============================== BOMBING DEFAULTS ==============================
 DEFAULT_COUNTRY_CODE = "91"
 
-DEFAULT_CALL_INTERVAL = 25    # seconds between successive CALL API hits
-DEFAULT_SMS_INTERVAL   = 5    # seconds between SMS/WhatsApp rounds
+DEFAULT_CALL_INTERVAL = 25     # seconds between successive CALL API hits
+DEFAULT_SMS_INTERVAL   = 5     # seconds between SMS/WhatsApp rounds
 
 MIN_CALL_INTERVAL = 10
 MIN_SMS_INTERVAL  = 2
@@ -29,7 +29,7 @@ TELEGRAM_RATE_LIMIT = 5         # minimum seconds between status updates
 
 # ============================== 71 APIs ====================================
 # CALL APIs (7) – hit one by one every call_interval seconds
-# SMS / WHATSAPP APIs (64) – fired together every sms_interval seconds
+# SMS / WHATSAPP APIs (64) – all fired together every sms_interval seconds
 BOMBER_APIS = [
 
     # ----------------- CALL APIs (7) ------------------
@@ -558,6 +558,3 @@ BOMBER_APIS = [
 # ============================== FILTERED LISTS ==============================
 CALL_APIS = [api for api in BOMBER_APIS if api["type"] == "CALL"]
 SMS_APIS  = [api for api in BOMBER_APIS if api["type"] in ("SMS", "WHATSAPP")]
-
-# Optional: print counts at startup
-# print(f"Loaded {len(CALL_APIS)} call APIs and {len(SMS_APIS)} SMS/WhatsApp APIs")
