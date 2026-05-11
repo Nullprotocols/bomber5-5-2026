@@ -5,14 +5,17 @@ from typing import List, Optional, Dict
 DB_FILE = "bot_data.db"
 
 def get_connection():
+    """Return a database connection with row factory, multi‑threading and WAL mode."""
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 def init_db():
+    """Create users and protected_numbers tables if not exists, with indexes."""
     conn = get_connection()
     c = conn.cursor()
+    # Users table
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -25,6 +28,7 @@ def init_db():
             user_phone TEXT
         )
     ''')
+    # Protected numbers table
     c.execute('''
         CREATE TABLE IF NOT EXISTS protected_numbers (
             number TEXT PRIMARY KEY,
@@ -32,12 +36,14 @@ def init_db():
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # Indexes
     c.execute('CREATE INDEX IF NOT EXISTS idx_users_banned ON users(banned)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)')
     conn.commit()
     conn.close()
 
 def add_user(user_id: int, username: Optional[str], first_name: Optional[str]):
+    """Add a new user or ignore if already exists."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)',
@@ -46,6 +52,7 @@ def add_user(user_id: int, username: Optional[str], first_name: Optional[str]):
     conn.close()
 
 def is_admin(user_id: int) -> bool:
+    """Check if user is admin or owner."""
     owner_id = os.getenv("OWNER_ID")
     if owner_id and str(user_id) == owner_id:
         return True
@@ -57,10 +64,12 @@ def is_admin(user_id: int) -> bool:
     return row and row['role'] == 'admin'
 
 def is_owner(user_id: int) -> bool:
+    """Check if user is the bot owner."""
     owner_id = os.getenv("OWNER_ID")
     return owner_id and str(user_id) == owner_id
 
 def set_admin_role(user_id: int, make_admin: bool):
+    """Promote or demote user to/from admin."""
     role = 'admin' if make_admin else 'user'
     conn = get_connection()
     c = conn.cursor()
@@ -69,6 +78,7 @@ def set_admin_role(user_id: int, make_admin: bool):
     conn.close()
 
 def ban_user(user_id: int) -> bool:
+    """Ban a user. Returns True if user existed."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('UPDATE users SET banned = 1 WHERE user_id = ?', (user_id,))
@@ -78,6 +88,7 @@ def ban_user(user_id: int) -> bool:
     return affected > 0
 
 def unban_user(user_id: int) -> bool:
+    """Unban a user. Returns True if user existed and was banned."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('UPDATE users SET banned = 0 WHERE user_id = ?', (user_id,))
@@ -87,6 +98,7 @@ def unban_user(user_id: int) -> bool:
     return affected > 0
 
 def delete_user(user_id: int) -> bool:
+    """Delete a user. Returns True if user existed."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
@@ -96,6 +108,7 @@ def delete_user(user_id: int) -> bool:
     return affected > 0
 
 def get_user_by_id(user_id: int) -> Optional[Dict]:
+    """Get user record by ID."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
@@ -104,6 +117,7 @@ def get_user_by_id(user_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 def update_user_target(user_id: int, target: Optional[str]):
+    """Store the target phone number for a user (used by admin lookup)."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('UPDATE users SET target_number = ? WHERE user_id = ?', (target, user_id))
@@ -111,6 +125,7 @@ def update_user_target(user_id: int, target: Optional[str]):
     conn.close()
 
 def get_user_target(user_id: int) -> Optional[str]:
+    """Retrieve the stored target phone number."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('SELECT target_number FROM users WHERE user_id = ?', (user_id,))
@@ -119,6 +134,7 @@ def get_user_target(user_id: int) -> Optional[str]:
     return row['target_number'] if row else None
 
 def update_user_phone(user_id: int, phone: str):
+    """Store user's own phone number (self‑bombing prevention)."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('UPDATE users SET user_phone = ? WHERE user_id = ?', (phone, user_id))
@@ -126,6 +142,7 @@ def update_user_phone(user_id: int, phone: str):
     conn.close()
 
 def get_user_phone(user_id: int) -> Optional[str]:
+    """Retrieve user's own phone number."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('SELECT user_phone FROM users WHERE user_id = ?', (user_id,))
@@ -134,16 +151,22 @@ def get_user_phone(user_id: int) -> Optional[str]:
     return row['user_phone'] if row else None
 
 def get_all_users_paginated(page: int, per_page: int = 10) -> List[Dict]:
+    """Return a page of users sorted by user_id."""
     offset = page * per_page
     conn = get_connection()
     c = conn.cursor()
-    c.execute('SELECT user_id, username, first_name, role, joined_at, banned FROM users ORDER BY user_id LIMIT ? OFFSET ?',
-              (per_page, offset))
+    c.execute('''
+        SELECT user_id, username, first_name, role, joined_at, banned
+        FROM users
+        ORDER BY user_id
+        LIMIT ? OFFSET ?
+    ''', (per_page, offset))
     rows = c.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(row) for row in rows]
 
 def get_recent_users_paginated(page: int, per_page: int = 10, days: int = 7) -> List[Dict]:
+    """Return a page of users who joined in the last N days, ordered by join date descending."""
     offset = page * per_page
     conn = get_connection()
     c = conn.cursor()
@@ -156,17 +179,19 @@ def get_recent_users_paginated(page: int, per_page: int = 10, days: int = 7) -> 
     ''', (f'-{days} days', per_page, offset))
     rows = c.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(row) for row in rows]
 
 def get_all_user_ids() -> List[int]:
+    """Return list of all user IDs."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('SELECT user_id FROM users')
     rows = c.fetchall()
     conn.close()
-    return [r['user_id'] for r in rows]
+    return [row['user_id'] for row in rows]
 
 def get_user_count() -> int:
+    """Return total number of users."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('SELECT COUNT(*) FROM users')
@@ -174,7 +199,9 @@ def get_user_count() -> int:
     conn.close()
     return count
 
+# ---------- Protected numbers functions ----------
 def add_protected_number(number: str, added_by: int) -> bool:
+    """Add a phone number to protected list. Returns True if added, False if already exists."""
     conn = get_connection()
     c = conn.cursor()
     try:
@@ -187,6 +214,7 @@ def add_protected_number(number: str, added_by: int) -> bool:
         conn.close()
 
 def remove_protected_number(number: str) -> bool:
+    """Remove a phone number from protected list. Returns True if removed."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('DELETE FROM protected_numbers WHERE number = ?', (number,))
@@ -196,6 +224,7 @@ def remove_protected_number(number: str) -> bool:
     return affected > 0
 
 def is_protected(number: str) -> bool:
+    """Check if a phone number is protected."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('SELECT 1 FROM protected_numbers WHERE number = ?', (number,))
@@ -204,9 +233,10 @@ def is_protected(number: str) -> bool:
     return row is not None
 
 def get_all_protected_numbers() -> List[str]:
+    """Return list of all protected numbers."""
     conn = get_connection()
     c = conn.cursor()
     c.execute('SELECT number FROM protected_numbers ORDER BY added_at DESC')
     rows = c.fetchall()
     conn.close()
-    return [r['number'] for r in rows]
+    return [row['number'] for row in rows]
