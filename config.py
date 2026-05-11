@@ -29,7 +29,7 @@ NORMAL_USER_AUTO_STOP_SECONDS = 10 * 60
 
 # ---------- Log Channel & Force Channels ----------
 LOG_CHANNEL_ID = -1003712674883
-FORCE_CHANNELS = []
+FORCE_CHANNELS = []                    # add dicts like {"id": -100..., "name": "Channel", "link": "https://t.me/..."}
 
 # ---------- 71 API Configurations ----------
 API_CONFIGS = [
